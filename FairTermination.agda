@@ -4,7 +4,6 @@ module FairTermination (State : Set) (_~>_ : State -> State -> Set) where
 
 import Level using (zero)
 open import Axiom.ExcludedMiddle using (ExcludedMiddle)
-open import Axiom.DoubleNegationElimination using (DoubleNegationElimination)
 open import Data.Empty using (⊥; ⊥-elim)
 open import Data.Sum using (_⊎_; inj₁; inj₂)
 open import Data.Product
@@ -14,9 +13,7 @@ open import Relation.Binary.Core using (Rel)
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive using (Star; ε; _◅_)
 open import Function.Base using (_∘_)
 
-postulate
-  excluded-middle : ExcludedMiddle Level.zero
-  double-negation-elimination : DoubleNegationElimination Level.zero
+postulate excluded-middle : ExcludedMiddle Level.zero
 
 StateProp : Set₁
 StateProp = State -> Set
