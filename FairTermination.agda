@@ -38,7 +38,7 @@ Stuck : StateProp
 Stuck S = ¬ (Reduces S)
 
 -- A run is a maximal sequence S ~> S₁ ~> S₂ ~> ..., that is a
--- sequence of reduction that is either infinite or it ends with a
+-- sequence of reductions that is either infinite or it ends with a
 -- stuck state Sₙ.
 
 data Run (S : State) : Set
