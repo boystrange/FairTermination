@@ -1,5 +1,7 @@
 {-# OPTIONS --guardedness #-}
 
+module FairTermination (State : Set) (_~>_ : State -> State -> Set) where
+
 import Level using (zero)
 open import Axiom.ExcludedMiddle using (ExcludedMiddle)
 open import Axiom.DoubleNegationElimination using (DoubleNegationElimination)
@@ -15,9 +17,6 @@ open import Function.Base using (_∘_)
 postulate
   excluded-middle : ExcludedMiddle Level.zero
   double-negation-elimination : DoubleNegationElimination Level.zero
-
-postulate State : Set
-postulate _~>_  : Rel State Level.zero
 
 StateProp : Set₁
 StateProp = State -> Set
