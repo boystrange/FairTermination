@@ -1,6 +1,3 @@
-# A characterization of fair termination in Agda
-
-```
 {-# OPTIONS --guardedness #-}
 
 import Level using (zero)
@@ -15,21 +12,34 @@ open import Relation.Binary.Core using (Rel)
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive using (Star; ε; _◅_)
 open import Function.Base using (_∘_)
 
-postulate State : Set
-postulate _~>_  : Rel State Level.zero
-
-Reduces : State -> Set
-Reduces S = Satisfiable (S ~>_)
-
-Stuck : State -> Set
-Stuck S = ¬ (Reduces S)
-
-_~>*_ : Rel State Level.zero
-_~>*_ = Star _~>_
-
 postulate
   excluded-middle : ExcludedMiddle Level.zero
   double-negation-elimination : DoubleNegationElimination Level.zero
+
+postulate State : Set
+postulate _~>_  : Rel State Level.zero
+
+StateProp : Set₁
+StateProp = State -> Set
+
+-- Reflexive and transitive closure of the reduction relation.
+
+_~>*_ : Rel State _
+_~>*_ = Star _~>_
+
+-- A state S reduces if S ~> S' for some S'.
+
+Reduces : StateProp
+Reduces S = Satisfiable (S ~>_)
+
+-- A state is stuck if it does not reduce.
+
+Stuck : StateProp
+Stuck S = ¬ (Reduces S)
+
+-- A run is a maximal sequence S ~> S₁ ~> S₂ ~> ..., that is a
+-- sequence of reduction that is either infinite or it ends with a
+-- stuck state Sₙ.
 
 data Run (S : State) : Set
 record ∞Run (S : State) : Set where
@@ -41,47 +51,63 @@ data Run S where
   stop : (stuck : Stuck S) -> Run S
   _::_ : ∀{S'} (red : S ~> S') (ρ : ∞Run S') -> Run S
 
-data _∈_ : ∀{S} -> State -> Run S -> Set where
+RunProp : Set₁
+RunProp = ∀{S} -> Run S -> Set
+
+-- We say that S belongs to ρ, notation S ∈ ρ, if S occurs somewhere
+-- in ρ.
+
+data _∈_ : State -> RunProp where
   here : ∀{S} (ρ : Run S) -> S ∈ ρ
   step : ∀{S S' T} (red : S ~> S') (ρ : ∞Run S') (pin : T ∈ ρ .force) -> T ∈ (red :: ρ)
 
-Eventually : (State -> Set) -> ∀{S} -> Run S -> Set
+-- We can build run propositions from state propositions using the
+-- "eventually" and "always" modalities.
+
+Eventually : StateProp -> RunProp
 Eventually P ρ = ∃[ S ] S ∈ ρ × P S
 
-Always : (State -> Set) -> ∀{S} -> Run S -> Set
+Always : StateProp -> RunProp
 Always P ρ = ∀{S} -> S ∈ ρ -> P S
 
-Finite : ∀{S} -> Run S -> Set
-Finite = Eventually Stuck
+-- If a state property P does not eventually hold in some run ρ,
+-- then the negation of P always holds in ρ.
 
-Infinite : ∀{S} -> Run S -> Set
-Infinite = Always Reduces
-
-WeaklyTerminating : State -> Set
-WeaklyTerminating S = Σ[ ρ ∈ Run S ] Finite ρ
-
-NonTerminating : State -> Set
-NonTerminating S = (ρ : Run S) -> Infinite ρ
-
-Fair : ∀{S} -> Run S -> Set
-Fair = Eventually Stuck ∪ Eventually NonTerminating
-
-FairlyTerminating : State -> Set
-FairlyTerminating S = (ρ : Run S) (fair : Fair ρ) -> Finite ρ
-
-Specification : State -> Set
-Specification S = ∀{S'} -> S ~>* S' -> WeaklyTerminating S'
-
-¬Eventually->Always¬ : (P : State -> Set) -> ∀{S} {ρ : Run S} -> ¬ Eventually P ρ -> Always (¬_ ∘ P) ρ
+¬Eventually->Always¬ : (P : StateProp) -> ∀{S} {ρ : Run S} -> ¬ Eventually P ρ -> Always (¬_ ∘ P) ρ
 ¬Eventually->Always¬ P {S} nep {T} pin with excluded-middle {P T}
 ... | yes p = ⊥-elim (nep (_ , pin , p))
 ... | no np = np
+
+-- A run is finite if it contains a stuck state. Conversely, a run
+-- is infinite if each of its states reduces.
+
+Finite : RunProp
+Finite = Eventually Stuck
+
+Infinite : RunProp
+Infinite = Always Reduces
+
+-- We prove that Finite and Infinite are one the negation of the
+-- other.
 
 finite->¬infinite : ∀{S} {ρ : Run S} -> Finite ρ -> ¬ Infinite ρ
 finite->¬infinite (_ , pin , stuck) inf = stuck (inf pin)
 
 ¬finite->infinite : ∀{S} {ρ : Run S} -> ¬ Finite ρ -> Infinite ρ
 ¬finite->infinite nfin pin = double-negation-elimination (¬Eventually->Always¬ Stuck nfin pin)
+
+-- A state S is weakly terminating if there is a finite run of S.
+
+WeaklyTerminating : StateProp
+WeaklyTerminating S = Σ[ ρ ∈ Run S ] Finite ρ
+
+-- A state S is non terminating if any run of S is infinite.
+
+NonTerminating : StateProp
+NonTerminating S = (ρ : Run S) -> Infinite ρ
+
+-- We prove that weak termination and non termination are one the
+-- opposite of the other.
 
 wt->¬nt : ∀{S} -> WeaklyTerminating S -> ¬ NonTerminating S
 wt->¬nt (ρ , fin) nt = finite->¬infinite fin (nt ρ)
@@ -90,6 +116,28 @@ wt->¬nt (ρ , fin) nt = finite->¬infinite fin (nt ρ)
 ¬wt->nt nwt ρ pin with excluded-middle {Finite ρ}
 ... | yes fin = ⊥-elim (nwt (ρ , fin))
 ... | no nfin = ¬finite->infinite nfin pin
+
+-- A run is fair if it contains finitely many weakly terminating
+-- states. This means that either the run is finite, or it
+-- eventually contains a non-terminating state.
+
+Fair : RunProp
+Fair = Eventually Stuck ∪ Eventually NonTerminating
+
+-- A state S is fairly terminating if all the fair runs of S are
+-- finite.
+
+FairlyTerminating : StateProp
+FairlyTerminating S = (ρ : Run S) (fair : Fair ρ) -> Finite ρ
+
+-- Here is the alternative characterization of fair termination that
+-- does not use fair runs. A state S satisfies the specification if
+-- any S' that is reachable from S is weakly terminating.
+
+Specification : StateProp
+Specification S = ∀{S'} -> S ~>* S' -> WeaklyTerminating S'
+
+-- Any state has an arbitrary and a fair run.
 
 make-run : (S : State) -> ∞Run S
 make-run S with excluded-middle {Reduces S}
@@ -102,7 +150,10 @@ make-fair-run S with excluded-middle {WeaklyTerminating S}
 ... | no nwt with make-run S .force
 ... | ρ = ρ , inj₂ (S , here ρ , ¬wt->nt nwt)
 
-::-eventually : (P : State -> Set) -> ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} -> Eventually P (ρ .force) -> Eventually P (red :: ρ)
+-- Eventual stuckness, eventual non termination and fairness are
+-- preserved by ::
+
+::-eventually : (P : StateProp) -> ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} -> Eventually P (ρ .force) -> Eventually P (red :: ρ)
 ::-eventually P {S} {S'} red {ρ} (T , pin , p) = T , step red ρ pin , p
 
 ::-eventually-stuck : ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} -> Eventually Stuck (ρ .force) -> Eventually Stuck (red :: ρ)
@@ -115,9 +166,17 @@ make-fair-run S with excluded-middle {WeaklyTerminating S}
 ::-fair red (inj₁ fin) = inj₁ (::-eventually-stuck red fin)
 ::-fair red (inj₂ ent) = inj₂ (::-eventually-nt red ent)
 
+-- Some auxiliary results concerning ∈
+
 ∈-stuck : ∀{S S' T} {red : S ~> S'} {ρ : ∞Run S'} -> Stuck T -> T ∈ (red :: ρ) -> T ∈ ρ .force
 ∈-stuck {_} {_} {_} {red} stuck (here .(_ :: _)) = ⊥-elim (stuck (_ , red))
 ∈-stuck _ (step _ _ pin) = pin
+
+∈-reductions : ∀{S S'} {ρ : Run S} -> S' ∈ ρ -> S ~>* S'
+∈-reductions (here _) = ε
+∈-reductions (step red _ pin) = red ◅ ∈-reductions pin
+
+-- Fair termination is preserved by reductions.
 
 ~>-ft : ∀{S S'} -> S ~> S' -> FairlyTerminating S -> FairlyTerminating S'
 ~>-ft red ft ρ fair with ft (red :: λ where .force -> ρ) (::-fair red fair)
@@ -127,20 +186,19 @@ make-fair-run S with excluded-middle {WeaklyTerminating S}
 ~>*-ft ε ft = ft
 ~>*-ft (red ◅ reds) ft = ~>*-ft reds (~>-ft red ft)
 
+-- Fair termination implies weak termination.
+
 ft->wt : ∀{S} -> FairlyTerminating S -> WeaklyTerminating S
 ft->wt {S} ft with make-fair-run S
 ... | ρ , fair with ft ρ fair
 ... | fin = ρ , fin
 
+-- Alternative characterization of fair termination.
+
 ft->spec : ∀{S} -> FairlyTerminating S -> Specification S
 ft->spec ft reds = ft->wt (~>*-ft reds ft)
-
-∈-reductions : ∀{S S'} {ρ : Run S} -> S' ∈ ρ -> S ~>* S'
-∈-reductions (here _) = ε
-∈-reductions (step red _ pin) = red ◅ ∈-reductions pin
 
 spec->ft : ∀{S} -> Specification S -> FairlyTerminating S
 spec->ft spec ρ (inj₁ fin) = fin
 spec->ft spec ρ (inj₂ (T , pin , nt)) with spec (∈-reductions pin)
 ... | wt = ⊥-elim (wt->¬nt wt nt)
-```
