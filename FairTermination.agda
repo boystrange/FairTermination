@@ -53,47 +53,14 @@ data Run S where
 RunProp : Set₁
 RunProp = ∀{S} -> Run S -> Set
 
--- We say that S belongs to ρ, notation S ∈ ρ, if S occurs somewhere
--- in ρ.
+-- A run is finite if it stops and it is infinite if it doesn't.
 
-data _∈_ : State -> RunProp where
-  here : ∀{S} (ρ : Run S) -> S ∈ ρ
-  step : ∀{S S' T} (red : S ~> S') (ρ : ∞Run S') (pin : T ∈ ρ .force) -> T ∈ (red :: ρ)
-
--- We can build run propositions from state propositions using the
--- "eventually" and "always" modalities.
-
-Eventually : StateProp -> RunProp
-Eventually P ρ = ∃[ S ] S ∈ ρ × P S
-
-Always : StateProp -> RunProp
-Always P ρ = ∀{S} -> S ∈ ρ -> P S
-
--- If a state property P does not eventually hold in some run ρ,
--- then the negation of P always holds in ρ.
-
-¬Eventually->Always¬ : (P : StateProp) -> ∀{S} {ρ : Run S} -> ¬ Eventually P ρ -> Always (¬_ ∘ P) ρ
-¬Eventually->Always¬ P {S} nep {T} pin with excluded-middle {P T}
-... | yes p = ⊥-elim (nep (_ , pin , p))
-... | no np = np
-
--- A run is finite if it contains a stuck state. Conversely, a run
--- is infinite if each of its states reduces.
-
-Finite : RunProp
-Finite = Eventually Stuck
+data Finite : RunProp where
+  fin-here : ∀{S} (stuck : Stuck S) -> Finite (stop stuck)
+  fin-next : ∀{S S'} (red : S ~> S') (ρ : ∞Run S') (fin : Finite (ρ .force)) -> Finite (red :: ρ)
 
 Infinite : RunProp
-Infinite = Always Reduces
-
--- We prove that Finite and Infinite are one the negation of the
--- other.
-
-finite->¬infinite : ∀{S} {ρ : Run S} -> Finite ρ -> ¬ Infinite ρ
-finite->¬infinite (_ , pin , stuck) inf = stuck (inf pin)
-
-¬finite->infinite : ∀{S} {ρ : Run S} -> ¬ Finite ρ -> Infinite ρ
-¬finite->infinite nfin pin = double-negation-elimination (¬Eventually->Always¬ Stuck nfin pin)
+Infinite ρ = ¬ Finite ρ
 
 -- A state S is weakly terminating if there is a finite run of S.
 
@@ -108,23 +75,28 @@ NonTerminating S = (ρ : Run S) -> Infinite ρ
 -- We prove that weak termination and non termination are one the
 -- opposite of the other.
 
-wt->¬nt : ∀{S} -> WeaklyTerminating S -> ¬ NonTerminating S
-wt->¬nt (ρ , fin) nt = finite->¬infinite fin (nt ρ)
-
 ¬wt->nt : ∀{S} -> ¬ WeaklyTerminating S -> NonTerminating S
-¬wt->nt nwt ρ pin with excluded-middle {Finite ρ}
-... | yes fin = ⊥-elim (nwt (ρ , fin))
-... | no nfin = ¬finite->infinite nfin pin
+¬wt->nt nwt ρ fin = nwt (ρ , fin)
+
+-- A run is divergent if it contains a non-terminating state.
+
+data Divergent : RunProp where
+  div-here : ∀{S} {ρ : Run S} (nt : NonTerminating S) -> Divergent ρ
+  div-next : ∀{S S'} (red : S ~> S') (ρ : ∞Run S') (div : Divergent (ρ .force)) -> Divergent (red :: ρ)
+
+div->nt : ∀{S} {ρ : Run S} -> Divergent ρ -> ∃[ S' ] S ~>* S' × NonTerminating S'
+div->nt (div-here nt) = _ , ε , nt
+div->nt (div-next red ρ div) =
+  let S' , reds , nt = div->nt div in
+  S' , red ◅ reds , nt
 
 -- A run is fair if it contains finitely many weakly terminating
--- states. This means that either the run is finite, or it
--- eventually contains a non-terminating state.
+-- states. This means that the run is either finite or divergent.
 
 Fair : RunProp
-Fair = Eventually Stuck ∪ Eventually NonTerminating
+Fair = Finite ∪ Divergent
 
--- A state S is fairly terminating if all the fair runs of S are
--- finite.
+-- A state S is fairly terminating if the fair runs of S are finite.
 
 FairlyTerminating : StateProp
 FairlyTerminating S = (ρ : Run S) (fair : Fair ρ) -> Finite ρ
@@ -147,39 +119,20 @@ make-fair-run : (S : State) -> Σ[ ρ ∈ Run S ] Fair ρ
 make-fair-run S with excluded-middle {WeaklyTerminating S}
 ... | yes (ρ , fin) = ρ , inj₁ fin
 ... | no nwt with make-run S .force
-... | ρ = ρ , inj₂ (S , here ρ , ¬wt->nt nwt)
+... | ρ = ρ , inj₂ (div-here (¬wt->nt nwt))
 
 -- Eventual stuckness, eventual non termination and fairness are
 -- preserved by ::
 
-::-eventually : (P : StateProp) -> ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} -> Eventually P (ρ .force) -> Eventually P (red :: ρ)
-::-eventually P {S} {S'} red {ρ} (T , pin , p) = T , step red ρ pin , p
-
-::-eventually-stuck : ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} -> Eventually Stuck (ρ .force) -> Eventually Stuck (red :: ρ)
-::-eventually-stuck = ::-eventually Stuck
-
-::-eventually-nt : ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} -> Eventually NonTerminating (ρ .force) -> Eventually NonTerminating (red :: ρ)
-::-eventually-nt = ::-eventually NonTerminating
-
 ::-fair : ∀{S S'} {ρ : ∞Run S'} (red : S ~> S') -> Fair (ρ .force) -> Fair (red :: ρ)
-::-fair red (inj₁ fin) = inj₁ (::-eventually-stuck red fin)
-::-fair red (inj₂ ent) = inj₂ (::-eventually-nt red ent)
-
--- Some auxiliary results concerning ∈
-
-∈-stuck : ∀{S S' T} {red : S ~> S'} {ρ : ∞Run S'} -> Stuck T -> T ∈ (red :: ρ) -> T ∈ ρ .force
-∈-stuck {_} {_} {_} {red} stuck (here .(_ :: _)) = ⊥-elim (stuck (_ , red))
-∈-stuck _ (step _ _ pin) = pin
-
-∈-reductions : ∀{S S'} {ρ : Run S} -> S' ∈ ρ -> S ~>* S'
-∈-reductions (here _) = ε
-∈-reductions (step red _ pin) = red ◅ ∈-reductions pin
+::-fair red (inj₁ fin) = inj₁ (fin-next red _ fin)
+::-fair red (inj₂ ent) = inj₂ (div-next red _ ent)
 
 -- Fair termination is preserved by reductions.
 
 ~>-ft : ∀{S S'} -> S ~> S' -> FairlyTerminating S -> FairlyTerminating S'
 ~>-ft red ft ρ fair with ft (red :: λ where .force -> ρ) (::-fair red fair)
-... | T , pin , stuck = T , ∈-stuck stuck pin , stuck
+... | (fin-next _ _) fin = fin
 
 ~>*-ft : ∀{S S'} -> S ~>* S' -> FairlyTerminating S -> FairlyTerminating S'
 ~>*-ft ε ft = ft
@@ -199,5 +152,6 @@ ft->spec ft reds = ft->wt (~>*-ft reds ft)
 
 spec->ft : ∀{S} -> Specification S -> FairlyTerminating S
 spec->ft spec ρ (inj₁ fin) = fin
-spec->ft spec ρ (inj₂ (T , pin , nt)) with spec (∈-reductions pin)
-... | wt = ⊥-elim (wt->¬nt wt nt)
+spec->ft spec ρ (inj₂ div) with div->nt div
+... | S' , reds , nt with spec reds
+... | σ , fin = ⊥-elim (nt σ fin)
