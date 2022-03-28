@@ -143,7 +143,7 @@ StuckFairness = record { Fair = Fair' ; make = make' ; extend = extend' }
     make' : (S : State) -> Σ[ ρ ∈ Run S ] Fair' ρ
     make' S with excluded-middle {WeaklyTerminating S}
     ... | yes (_ , fin) = _ , eventually-imp Stuck (Stuck ∪ NonTerminating) inj₁ fin
-    ... | no nwt = make-any-run S .force , here (inj₂ nwt)
+    ... | no nt = make-any-run S .force , here (inj₂ nt)
 
 -- A state S is fairly terminating if the fair runs of S are finite.
 
@@ -157,22 +157,23 @@ FairlyTerminating ϕ S = ∀{ρ : Run S} -> Fair ϕ ρ -> Finite ρ
 Specification : StateProp
 Specification S = ∀{S'} -> S ~>* S' -> WeaklyTerminating S'
 
--- Alternative characterization of fair termination.
+-- The specification is a *necessary* condition for fair
+-- termination, regardless of the fairness assumption being made
 
 ft->spec : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> Specification S
-ft->spec ϕ ft reds = ft->wt ϕ (λ fair -> finite-++ reds (ft (extend ϕ reds fair)))
-  where
-    -- Fair termination implies weak termination.
-    ft->wt : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> WeaklyTerminating S
-    ft->wt ϕ {S} ft = let _ , fair = make ϕ S in _ , ft fair
+ft->spec ϕ ft {S'} reds = let _ , fair = make ϕ S' in
+                          _ , finite-++ reds (ft (extend ϕ reds fair))
+
+-- The specification is a *sufficient* condition for the notion of
+-- fair termination induced by StuckFairness
 
 spec->ft : ∀{S} -> Specification S -> FairlyTerminating StuckFairness S
 spec->ft spec (here (inj₁ stuck)) = here stuck
 spec->ft spec (here (inj₂ nt)) = ⊥-elim (nt (spec ε))
 spec->ft spec (next red ρ fair) = next red ρ (spec->ft (λ reds -> spec (red ◅ reds)) fair)
 
--- StuckFairness is the fairness assumption that induces the largest
--- family of fairly terminating states
+-- As a consequence, StuckFairness is the fairness assumption that
+-- induces the largest family of fairly terminating states
 
 ft->ft : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> FairlyTerminating StuckFairness S
 ft->ft ϕ = spec->ft ∘ ft->spec ϕ
