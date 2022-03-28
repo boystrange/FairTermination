@@ -1,14 +1,32 @@
+-- This file is part of FairTermination
+
+-- FairTermination is free software: you can redistribute it and/or
+-- modify it under the terms of the GNU General Public License as
+-- published by the Free Software Foundation, either version 3 of
+-- the License, or (at your option) any later version.
+
+-- FairTermination is distributed in the hope that it will be
+-- useful, but WITHOUT ANY WARRANTY; without even the implied
+-- warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+-- See the GNU General Public License for more details.
+
+-- You should have received a copy of the GNU General Public License
+-- along with FairTermination. If not, see
+-- <http://www.gnu.org/licenses/>.
+
+-- Copyright 2022 Luca Padovani
+
 {-# OPTIONS --guardedness #-}
 
 module FairTermination (State : Set) (_~>_ : State -> State -> Set) where
 
 import Level using (zero)
 open import Axiom.ExcludedMiddle using (ExcludedMiddle)
-open import Data.Empty using (⊥; ⊥-elim)
-open import Data.Sum using (_⊎_; inj₁; inj₂)
+open import Data.Empty using (⊥-elim)
+open import Data.Sum using (inj₁; inj₂)
 open import Data.Product
 open import Relation.Nullary using (¬_; yes; no)
-open import Relation.Unary using (Empty; Satisfiable; _∪_)
+open import Relation.Unary using (Satisfiable; _∪_)
 open import Relation.Binary.Core using (Rel)
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive using (Star; ε; _◅_)
 open import Function.Base using (_∘_)
@@ -32,15 +50,6 @@ Reduces S = Satisfiable (S ~>_)
 Stuck : StateProp
 Stuck S = ¬ (Reduces S)
 
--- A state is weakly terminating if it has a finite run. A state is
--- non terminating if it is not weakly terminating.
-
-WeaklyTerminating : StateProp
-WeaklyTerminating S = ∃[ S' ] S ~>* S' × Stuck S'
-
-NonTerminating : StateProp
-NonTerminating S = ¬ WeaklyTerminating S
-
 -- A run is a maximal sequence S ~> S₁ ~> S₂ ~> ..., that is a
 -- sequence of reductions that is either infinite or it ends with a
 -- stuck state Sₙ.
@@ -60,6 +69,10 @@ make-any-run S with excluded-middle {Reduces S}
 ... | yes (S' , red) = λ where .force -> red :: make-any-run S'
 ... | no stuck = λ where .force -> stop stuck
 
+_++_ : ∀{S S'} -> S ~>* S' -> Run S' -> Run S
+ε ++ ρ = ρ
+(red ◅ reds) ++ ρ = red :: (λ where .force -> reds ++ ρ)
+
 RunProp : Set₁
 RunProp = ∀{S} -> Run S -> Set
 
@@ -70,49 +83,72 @@ data Eventually (P : StateProp) : RunProp where
   here : ∀{S} {ρ : Run S} (proof : P S) -> Eventually P ρ
   next : ∀{S S'} (red : S ~> S') (ρ : ∞Run S') (ev : Eventually P (ρ .force)) -> Eventually P (red :: ρ)
 
--- Each run that satisfies Eventually P corresponds to a sequence of
--- reductions leading to a state that satisfies P.
+++-eventually : (P : StateProp) -> ∀{S S'} (reds : S ~>* S') {ρ : Run S'} -> Eventually P ρ -> Eventually P (reds ++ ρ)
+++-eventually P ε ev = ev
+++-eventually P (red ◅ reds) ev = next red _ (++-eventually P reds ev)
 
-pack : ∀{P : StateProp} {S S'} -> S ~>* S' -> P S' -> Σ[ ρ ∈ Run S ] Eventually P ρ
-pack ε proof = make-any-run _ .force , here proof
-pack (red ◅ reds) proof =
-  let ρ , fin = pack reds proof in
-  _ , next red (λ where .force -> ρ) fin
+eventually-imp : (P Q : StateProp) -> (∀{S} -> P S -> Q S) -> ∀{S} {ρ : Run S} -> Eventually P ρ -> Eventually Q ρ
+eventually-imp P Q imp (here proof) = here (imp proof)
+eventually-imp P Q imp (next red ρ ev) = next red ρ (eventually-imp P Q imp ev)
 
-unpack : ∀{P : StateProp} {S} {ρ : Run S} -> Eventually P ρ -> ∃[ S' ] S ~>* S' × P S'
-unpack (here proof) = _ , ε , proof
-unpack (next red ρ fin) =
-  let _ , reds , proof = unpack fin in
-  _ , red ◅ reds , proof
-
--- A run is finite if it contains a stuck state. A run is divergent
--- if it contains a non-terminating state.
+-- A run is finite if it contains a stuck state.
 
 Finite : RunProp
 Finite = Eventually Stuck
 
-Divergent : RunProp
-Divergent = Eventually NonTerminating
+finite-++ : ∀{S S'} (reds : S ~>* S') {ρ : Run S'} -> Finite (reds ++ ρ) -> Finite ρ
+finite-++ ε fin = fin
+finite-++ (red ◅ reds) (here stuck) = ⊥-elim (stuck (_ , red))
+finite-++ (red ◅ reds) (next _ _ fin) = finite-++ reds fin
+
+-- A state is weakly terminating if it has a finite run. A state is
+-- non terminating if it is not weakly terminating.
+
+WeaklyTerminating : StateProp
+WeaklyTerminating S = Σ[ ρ ∈ Run S ] Finite ρ
+
+NonTerminating : StateProp
+NonTerminating S = ¬ WeaklyTerminating S
+
+-- A fairness assumption is a proposition over runs such that: (1)
+-- for every state S there exists a fair run of S and (2) every fair
+-- run of S' can be extended to a fair run of S if S ~>* S'
+
+record FairnessAssumption : Set₁ where
+  field
+    Fair : RunProp
+    make : (S : State) -> Σ[ ρ ∈ Run S ] Fair ρ
+    extend : ∀{S S'} (reds : S ~>* S') -> {ρ : Run S'} -> Fair ρ -> Fair (reds ++ ρ)
+open FairnessAssumption public
+
+-- Feasibility follows from the definition of fairness assumption
+
+feasibility : (ϕ : FairnessAssumption) -> ∀{S S'} (reds : S ~>* S') -> Σ[ ρ ∈ Run S' ] Fair ϕ (reds ++ ρ)
+feasibility ϕ {_} {S'} reds =
+  let ρ , fair = make ϕ S' in
+  ρ , extend ϕ reds fair
 
 -- A run is fair if it contains finitely many weakly terminating
 -- states. This means that the run is either finite or divergent.
 
-Fair : RunProp
-Fair = Finite ∪ Divergent
+StuckFairness : FairnessAssumption
+StuckFairness = record { Fair = Fair' ; make = make' ; extend = extend' }
+  where
+    Fair' : RunProp
+    Fair' = Eventually (Stuck ∪ NonTerminating)
 
--- Any state has a fair run. This property (formulated in a slightly
--- different way) is also known as feasibility or machine closure
--- and asserts that the fairness notion we consider "makes sense".
+    extend' : ∀{S S'} (reds : S ~>* S') -> {ρ : Run S'} -> Fair' ρ -> Fair' (reds ++ ρ)
+    extend' = ++-eventually (Stuck ∪ NonTerminating)
 
-make-fair-run : (S : State) -> Σ[ ρ ∈ Run S ] Fair ρ
-make-fair-run S with excluded-middle {WeaklyTerminating S}
-... | yes (S' , reds , stuck) = let ρ , fin = pack reds stuck in ρ , inj₁ fin
-... | no nwt = make-any-run S .force , inj₂ (here nwt)
+    make' : (S : State) -> Σ[ ρ ∈ Run S ] Fair' ρ
+    make' S with excluded-middle {WeaklyTerminating S}
+    ... | yes (_ , fin) = _ , eventually-imp Stuck (Stuck ∪ NonTerminating) inj₁ fin
+    ... | no nwt = make-any-run S .force , here (inj₂ nwt)
 
 -- A state S is fairly terminating if the fair runs of S are finite.
 
-FairlyTerminating : StateProp
-FairlyTerminating S = (ρ : Run S) -> Fair ρ -> Finite ρ
+FairlyTerminating : FairnessAssumption -> StateProp
+FairlyTerminating ϕ S = ∀{ρ : Run S} -> Fair ϕ ρ -> Finite ρ
 
 -- Here is the alternative characterization of fair termination that
 -- does not use fair runs. A state S satisfies the specification if
@@ -121,34 +157,22 @@ FairlyTerminating S = (ρ : Run S) -> Fair ρ -> Finite ρ
 Specification : StateProp
 Specification S = ∀{S'} -> S ~>* S' -> WeaklyTerminating S'
 
--- Fairness is preserved by ::
-
-::-fair : ∀{S S'} {ρ : ∞Run S'} (red : S ~> S') -> Fair (ρ .force) -> Fair (red :: ρ)
-::-fair red (inj₁ fin) = inj₁ (next red _ fin)
-::-fair red (inj₂ ent) = inj₂ (next red _ ent)
-
--- Fair termination is preserved by reductions.
-
-~>-ft : ∀{S S'} -> S ~> S' -> FairlyTerminating S -> FairlyTerminating S'
-~>-ft red ft ρ fair with ft (red :: λ where .force -> ρ) (::-fair red fair)
-... | here stuck = ⊥-elim (stuck (_ , red))
-... | next _ _ fin = fin
-
-~>*-ft : ∀{S S'} -> S ~>* S' -> FairlyTerminating S -> FairlyTerminating S'
-~>*-ft ε ft = ft
-~>*-ft (red ◅ reds) ft = ~>*-ft reds (~>-ft red ft)
-
--- Fair termination implies weak termination.
-
-ft->wt : ∀{S} -> FairlyTerminating S -> WeaklyTerminating S
-ft->wt {S} ft = let ρ , fair = make-fair-run S in unpack (ft _ fair)
-
 -- Alternative characterization of fair termination.
 
-ft->spec : ∀{S} -> FairlyTerminating S -> Specification S
-ft->spec ft reds = ft->wt (~>*-ft reds ft)
+ft->spec : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> Specification S
+ft->spec ϕ ft reds = ft->wt ϕ (λ fair -> finite-++ reds (ft (extend ϕ reds fair)))
+  where
+    -- Fair termination implies weak termination.
+    ft->wt : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> WeaklyTerminating S
+    ft->wt ϕ {S} ft = let _ , fair = make ϕ S in _ , ft fair
 
-spec->ft : ∀{S} -> Specification S -> FairlyTerminating S
-spec->ft spec ρ (inj₁ fin) = fin
-spec->ft spec ρ (inj₂ div) with unpack div
-... | _ , reds , nt = ⊥-elim (nt (spec reds))
+spec->ft : ∀{S} -> Specification S -> FairlyTerminating StuckFairness S
+spec->ft spec (here (inj₁ stuck)) = here stuck
+spec->ft spec (here (inj₂ nt)) = ⊥-elim (nt (spec ε))
+spec->ft spec (next red ρ fair) = next red ρ (spec->ft (λ reds -> spec (red ◅ reds)) fair)
+
+-- StuckFairness is the fairness assumption that induces the largest
+-- family of fairly terminating states
+
+ft->ft : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> FairlyTerminating StuckFairness S
+ft->ft ϕ = spec->ft ∘ ft->spec ϕ
