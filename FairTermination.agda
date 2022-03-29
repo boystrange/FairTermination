@@ -81,15 +81,15 @@ RunProp = ∀{S} -> Run S -> Set
 
 data Eventually (P : StateProp) : RunProp where
   here : ∀{S} {ρ : Run S} (proof : P S) -> Eventually P ρ
-  next : ∀{S S'} (red : S ~> S') (ρ : ∞Run S') (ev : Eventually P (ρ .force)) -> Eventually P (red :: ρ)
+  next : ∀{S S'} (red : S ~> S') {ρ : ∞Run S'} (ev : Eventually P (ρ .force)) -> Eventually P (red :: ρ)
 
 ++-eventually : (P : StateProp) -> ∀{S S'} (reds : S ~>* S') {ρ : Run S'} -> Eventually P ρ -> Eventually P (reds ++ ρ)
 ++-eventually P ε ev = ev
-++-eventually P (red ◅ reds) ev = next red _ (++-eventually P reds ev)
+++-eventually P (red ◅ reds) ev = next red (++-eventually P reds ev)
 
 eventually-imp : (P Q : StateProp) -> (∀{S} -> P S -> Q S) -> ∀{S} {ρ : Run S} -> Eventually P ρ -> Eventually Q ρ
-eventually-imp P Q imp (here proof) = here (imp proof)
-eventually-imp P Q imp (next red ρ ev) = next red ρ (eventually-imp P Q imp ev)
+eventually-imp _ _ imp (here proof) = here (imp proof)
+eventually-imp P Q imp (next red ev) = next red (eventually-imp P Q imp ev)
 
 -- A run is finite if it contains a stuck state.
 
@@ -99,7 +99,7 @@ Finite = Eventually Stuck
 finite-++ : ∀{S S'} (reds : S ~>* S') {ρ : Run S'} -> Finite (reds ++ ρ) -> Finite ρ
 finite-++ ε fin = fin
 finite-++ (red ◅ reds) (here stuck) = ⊥-elim (stuck (_ , red))
-finite-++ (red ◅ reds) (next _ _ fin) = finite-++ reds fin
+finite-++ (red ◅ reds) (next _ fin) = finite-++ reds fin
 
 -- A state is weakly terminating if it has a finite run. A state is
 -- non terminating if it is not weakly terminating.
@@ -169,7 +169,7 @@ ft->spec ϕ ft reds = ft->wt ϕ (λ fair -> finite-++ reds (ft (extend ϕ reds f
 spec->ft : ∀{S} -> Specification S -> FairlyTerminating StuckFairness S
 spec->ft spec (here (inj₁ stuck)) = here stuck
 spec->ft spec (here (inj₂ nt)) = ⊥-elim (nt (spec ε))
-spec->ft spec (next red ρ fair) = next red ρ (spec->ft (λ reds -> spec (red ◅ reds)) fair)
+spec->ft spec (next red fair) = next red (spec->ft (λ reds -> spec (red ◅ reds)) fair)
 
 -- StuckFairness is the fairness assumption that induces the largest
 -- family of fairly terminating states
