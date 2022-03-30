@@ -110,40 +110,32 @@ WeaklyTerminating S = Σ[ ρ ∈ Run S ] Finite ρ
 NonTerminating : StateProp
 NonTerminating S = ¬ WeaklyTerminating S
 
--- A fairness assumption is a proposition over runs such that: (1)
--- for every state S there exists a fair run of S and (2) every fair
--- run of S' can be extended to a fair run of S if S ~>* S'
+-- A fairness assumption is a proposition over runs such that every
+-- partial run S ~>* S' can be extended to a fair run. This
+-- condition is called feasibility or machine closure
 
 record FairnessAssumption : Set₁ where
   field
     Fair : RunProp
-    make : (S : State) -> Σ[ ρ ∈ Run S ] Fair ρ
-    extend : ∀{S S'} (reds : S ~>* S') -> {ρ : Run S'} -> Fair ρ -> Fair (reds ++ ρ)
+    feasible : ∀{S S'} (reds : S ~>* S') -> Σ[ ρ ∈ Run S' ] Fair (reds ++ ρ)
 open FairnessAssumption public
-
--- Feasibility follows from the definition of fairness assumption
-
-feasibility : (ϕ : FairnessAssumption) -> ∀{S S'} (reds : S ~>* S') -> Σ[ ρ ∈ Run S' ] Fair ϕ (reds ++ ρ)
-feasibility ϕ {_} {S'} reds =
-  let ρ , fair = make ϕ S' in
-  ρ , extend ϕ reds fair
 
 -- A run is fair if it contains finitely many weakly terminating
 -- states. This means that the run is either finite or divergent.
 
 StuckFairness : FairnessAssumption
-StuckFairness = record { Fair = Fair' ; make = make' ; extend = extend' }
+StuckFairness = record { Fair = Fair' ; feasible = feasible' }
   where
     Fair' : RunProp
     Fair' = Eventually (Stuck ∪ NonTerminating)
 
-    extend' : ∀{S S'} (reds : S ~>* S') -> {ρ : Run S'} -> Fair' ρ -> Fair' (reds ++ ρ)
-    extend' = ++-eventually (Stuck ∪ NonTerminating)
-
-    make' : (S : State) -> Σ[ ρ ∈ Run S ] Fair' ρ
-    make' S with excluded-middle {WeaklyTerminating S}
+    make : (S : State) -> Σ[ ρ ∈ Run S ] Fair' ρ
+    make S with excluded-middle {WeaklyTerminating S}
     ... | yes (_ , fin) = _ , eventually-imp Stuck (Stuck ∪ NonTerminating) inj₁ fin
     ... | no nt = make-any-run S .force , here (inj₂ nt)
+
+    feasible' : ∀{S S'} (reds : S ~>* S') -> Σ[ ρ ∈ Run S' ] Fair' (reds ++ ρ)
+    feasible' {_} {S'} reds = let _ , fair = make S' in _ , ++-eventually _ reds fair
 
 -- A state S is fairly terminating if the fair runs of S are finite.
 
@@ -161,8 +153,8 @@ Specification S = ∀{S'} -> S ~>* S' -> WeaklyTerminating S'
 -- termination, regardless of the fairness assumption being made
 
 ft->spec : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> Specification S
-ft->spec ϕ ft {S'} reds = let _ , fair = make ϕ S' in
-                          _ , finite-++ reds (ft (extend ϕ reds fair))
+ft->spec ϕ ft {S'} reds = let _ , fair = feasible ϕ reds in
+                          _ , finite-++ reds (ft fair)
 
 -- The specification is a *sufficient* condition for the notion of
 -- fair termination induced by StuckFairness
