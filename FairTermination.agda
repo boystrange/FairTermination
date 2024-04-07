@@ -123,8 +123,8 @@ open FairnessAssumption public
 -- A run is fair if it contains finitely many weakly terminating
 -- states. This means that the run is either finite or divergent.
 
-StuckFairness : FairnessAssumption
-StuckFairness = record { Fair = Fair' ; feasible = feasible' }
+FullFairness : FairnessAssumption
+FullFairness = record { Fair = Fair' ; feasible = feasible' }
   where
     Fair' : RunProp
     Fair' = Eventually (Stuck ∪ NonTerminating)
@@ -157,15 +157,15 @@ ft->spec ϕ ft {S'} reds = let _ , fair = feasible ϕ reds in
                           _ , finite-++ reds (ft fair)
 
 -- The specification is a *sufficient* condition for the notion of
--- fair termination induced by StuckFairness
+-- fair termination induced by FullFairness
 
-spec->ft : ∀{S} -> Specification S -> FairlyTerminating StuckFairness S
+spec->ft : ∀{S} -> Specification S -> FairlyTerminating FullFairness S
 spec->ft spec (here (inj₁ stuck)) = here stuck
 spec->ft spec (here (inj₂ nt)) = ⊥-elim (nt (spec ε))
 spec->ft spec (next red fair) = next red (spec->ft (λ reds -> spec (red ◅ reds)) fair)
 
--- As a consequence, StuckFairness is the fairness assumption that
+-- As a consequence, FullFairness is the fairness assumption that
 -- induces the largest family of fairly terminating states
 
-ft->ft : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> FairlyTerminating StuckFairness S
+ft->ft : (ϕ : FairnessAssumption) -> ∀{S} -> FairlyTerminating ϕ S -> FairlyTerminating FullFairness S
 ft->ft ϕ = spec->ft ∘ ft->spec ϕ
